@@ -1,0 +1,149 @@
+
+#1. read just 1000 lines of the file
+
+# the file is public data from the city of chicago
+# https://data.cityofchicago.org/Buildings/Building-Permits/ydr8-5enu/data
+
+
+#2 what is the file size in MB :: 325 M
+
+import os
+file_path = r'C:\Users\arul.francis\Documents\Data\Building_Permits.csv'
+size_in_meg = os.path.getsize(file_path)/1024/1024
+round(size_in_meg)
+
+#3 build a header row to use for named tuple constr
+
+# read ten lines into a list of lists to examine the data 
+nlines = 10
+lines = []
+from itertools import islice
+with open(file_path) as f:
+    for line in islice(f, nlines):
+        lines.append(line)
+
+cols = str(lines[:1]) # convert the header to a string to trim off the ends
+# build a header from the top row trim off extra chars on each end 
+cols = cols.lstrip("\"['").rstrip("\\n']").split(',') 
+
+# cleanup the header so there are no # or spaces in col names
+cols = [col.lstrip().replace('#','_NUMBER').replace(' ','_').lower() for col in cols]
+
+
+from collections import namedtuple
+chicagorow = namedtuple('chicagorow', cols)
+
+
+#4 read in the file and yield each row as a namedtuple
+
+fname = r'C:\Users\arul.francis\Documents\Data\Building_Permits.csv'
+import csv
+def read_file(fname):
+    with open(fname) as fh:
+        reader = csv.reader(fh)
+        next(reader) # skip header
+        for r in reader:
+            yield chicagorow(*r) # map cols to namedtuple and return a gnrtr expr
+
+
+#5 build contractors data set
+
+# there are up to 15 contractors spread horizontally for each permit
+# get the distinct contractors into a dimension
+
+
+contractor_cols = [
+'name',
+'address',
+'city',
+'state',
+'zipcode',
+'phone']
+contractor_row = namedtuple('contractor_row',contractor_cols)
+
+def get_permits_uniq_contractor_names(permit_row, num_of_contractors):
+    this_permits_contractor_names = set()
+    
+    # go through all the horizontally spread out contractors for each permit 
+
+    for i in range(num_of_contractors):
+        
+        s_name = 'contractor_' + str(i+1) + '_name'
+        s_address = 'contractor_' + str(i+1) + '_address'
+        s_city = 'contractor_' + str(i+1) + '_city'
+        s_state = 'contractor_' + str(i+1) + '_state'
+        s_zipcode = 'contractor_' + str(i+1) + '_zipcode'
+        s_phone = 'contractor_' + str(i+1) + '_phone'
+        
+        a_contractor_row = contractor_row(s_name, s_address, s_city, s_state, s_zipcode, s_phone)
+        
+        # build a set of uniq contractors for each permit
+        
+        this_permits_contractor_name = getattr(permit_row,s_name)
+        if len(this_permits_contractor_name) > 0 :
+            this_permits_contractor_names.add(this_permits_contractor_name)
+            
+    return permit_row.id, list(this_permits_contractor_names)
+
+from collections import namedtuple
+chicagorow = namedtuple('chicagorow', cols)
+
+#6  one container for overall uniq contractors and another for contractors for a permit
+
+uniq_contractor_names = set() # put this in a standalone dim tbl
+permid_contractors = {} # put this in an assoc tbl of permits to contractors
+
+for idx, row in enumerate(read_file(fname)):
+    if idx > 3: 
+        break
+    permit_id, contractors = get_permits_uniq_contractor_names(row, 15)
+    permid_contractors[permit_id] = contractors
+    uniq_contractor_names.update(set(contractors))
+
+# this is just the uniq contractor dataset
+
+uniq_contractor_names
+
+# {'MARTINEZ LUIS A',
+#  'MILLARD BUILDING CONTRACTOR',
+#  'PALOMINO CONSTRUCTION,  INC.',
+#  'PL058140146-ZBIGNIEW ZIMNY PLU',
+#  'ROBERT MICHAEL',
+#  'UNITED MECHANICAL CORP',
+#  'VUK BUILDERS, INC'}
+
+# build cross matrix of permits and contractors
+
+permid_contractors
+
+# {'1374921': [],
+#  '1377863': [],
+#  '1378485': ['UNITED MECHANICAL CORP',
+#   'PL058140146-ZBIGNIEW ZIMNY PLU',
+#   'MARTINEZ LUIS A',
+#   'PALOMINO CONSTRUCTION,  INC.',
+#   'VUK BUILDERS, INC',
+#   'MILLARD BUILDING CONTRACTOR',
+#   'ROBERT MICHAEL'],
+#  '1379931': []}
+
+
+# 7. build a set of ids and contractor names to seed a contractor dim table
+
+
+import hashlib
+def string_to_int(contractor):
+    return int(int(hashlib.md5(contractor.encode("utf-8")).hexdigest(), 16)/1e30)
+
+contractors = [(string_to_int(contractor), contractor.title())  for contractor in list(uniq_contractor_names)]
+
+
+contractors
+
+# [(57088216, 'United Mechanical Corp'),
+#  (274484870, 'Palomino Construction,  Inc.'),
+#  (189413807, 'Vuk Builders, Inc'),
+#  (223628156, 'Robert Michael'),
+#  (217356045, 'Millard Building Contractor'),
+#  (207314428, 'Pl058140146-Zbigniew Zimny Plu'),
+#  (22570161, 'Martinez Luis A')]
